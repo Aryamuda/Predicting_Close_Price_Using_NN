@@ -9,7 +9,9 @@ add_executable(Predicting_Close_Price_Using_NN src/main.cpp
         include/Activations.h
         src/Activations.cpp
         include/Loss.h
-        src/Loss.cpp)
+        src/Loss.cpp
+        include/Layer.h
+        src/Layer.cpp)
 
 # Specify  directories
 include_directories(include)
