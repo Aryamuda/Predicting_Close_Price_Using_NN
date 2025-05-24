@@ -1,8 +1,10 @@
 // src/Layer.cpp
 #include "Layer.h"
 #include "Utils.h"
+#include "Activations.h"
 #include <cmath>
 #include <stdexcept>
+#include <numeric>
 
 namespace Predicting_Close_Price_Using_NN {
 
@@ -40,31 +42,63 @@ namespace Predicting_Close_Price_Using_NN {
     }
 
     void Layer::initialize_parameters() {
-        // Initialize weights
         weights_.resize(output_size_, std::vector<double>(input_size_));
+        biases_.assign(output_size_, 0.0); // Initialize biases to zero
 
-        // He initialization for ReLU
-        // Xavier/Glorot initialization for Sigmoid
-        // Small random values for Linear output layer
         double scale = 1.0;
         if (activation_type_ == "relu") {
-            scale = std::sqrt(2.0 / input_size_); // He initialization factor
-        } else if (activation_type_ == "sigmoid") {
-            // Xavier/Glorot initialization factor for sigmoid/tanh
+            scale = std::sqrt(2.0 / input_size_); // He initialization
+        } else if (activation_type_ == "sigmoid" || activation_type_ == "linear") {
+            // Xavier/Glorot initialization for sigmoid/linear (can be tuned for linear)
             scale = std::sqrt(1.0 / input_size_);
-        } else if (activation_type_ == "linear") {
-
+        }
 
         for (int i = 0; i < output_size_; ++i) {
             for (int j = 0; j < input_size_; ++j) {
-                // Generate number from a standard normal distribution (mean 0, variance 1)
-                // then scale it
                 weights_[i][j] = Utils::random_double(-1.0, 1.0) * scale;
             }
         }
+    }
 
-        // Initialize biases to zero
-        biases_.assign(output_size_, 0.0);
+    std::vector<double> Layer::forward(const std::vector<double>& input_data, bool training_mode) {
+        if (static_cast<int>(input_data.size()) != input_size_) {
+            throw std::invalid_argument("Layer::forward - Input data size (" + std::to_string(input_data.size()) +
+                                        ") does not match layer input size (" + std::to_string(input_size_) + ").");
+        }
+
+        // Cache the input data
+        input_cache_ = input_data;
+
+        // Suppress unused parameter warning for training_mode if dropout is not yet implemented
+        (void)training_mode;
+
+        // Calculate Z = W*X + B (pre-activation values)
+        // z_cache_ has already been resized in the constructor.
+        for (int i = 0; i < output_size_; ++i) {
+            double z_neuron_i = biases_[i]; // Start with the bias
+            for (int j = 0; j < input_size_; ++j) {
+                z_neuron_i += weights_[i][j] * input_cache_[j];
+            }
+            z_cache_[i] = z_neuron_i;
+        }
+
+        // Apply activation function to Z to get A (activated_output)
+        // activation_cache_ has already been resized.
+        if (activation_type_ == "relu") {
+            for (int i = 0; i < output_size_; ++i) {
+                activation_cache_[i] = Activations::relu(z_cache_[i]);
+            }
+        } else if (activation_type_ == "sigmoid") {
+            for (int i = 0; i < output_size_; ++i) {
+                activation_cache_[i] = Activations::sigmoid(z_cache_[i]);
+            }
+        } else if (activation_type_ == "linear") {
+            for (int i = 0; i < output_size_; ++i) {
+                activation_cache_[i] = Activations::linear(z_cache_[i]);
+            }
+        }
+
+        return activation_cache_;
     }
 
 }

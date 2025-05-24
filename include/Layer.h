@@ -38,6 +38,7 @@ namespace Predicting_Close_Price_Using_NN {
         // Construct a Layer object with the specified parameters.
         Layer(int input_size, int output_size, const std::string& activation_type, double dropout_rate = 0.0);
 
+        std::vector<double> forward(const std::vector<double>& input_data, bool training_mode = false);
     private:
         void initialize_parameters();
     };
