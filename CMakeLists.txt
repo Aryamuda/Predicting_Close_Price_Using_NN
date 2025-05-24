@@ -3,7 +3,9 @@ project(PricePredictorNN)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(Predicting_Close_Price_Using_NN src/main.cpp)
+add_executable(Predicting_Close_Price_Using_NN src/main.cpp
+        include/Utils.h
+        src/Utils.cpp)
 
 # Specify  directories
 include_directories(include)
