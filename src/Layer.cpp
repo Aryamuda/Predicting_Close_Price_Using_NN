@@ -5,6 +5,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <numeric>
+#include <iostream>
 
 namespace Predicting_Close_Price_Using_NN {
 
@@ -20,7 +21,7 @@ namespace Predicting_Close_Price_Using_NN {
         if (output_size <= 0) {
             throw std::invalid_argument("Layer output size must be positive.");
         }
-        if (dropout_rate < 0.0 || dropout_rate >= 1.0) { // Dropout of 1.0 would zero out everything
+        if (dropout_rate < 0.0 || dropout_rate >= 1.0) {
             throw std::invalid_argument("Dropout rate must be in [0.0, 1.0).");
         }
 
@@ -33,17 +34,15 @@ namespace Predicting_Close_Price_Using_NN {
         initialize_parameters();
 
         // Initialize cache vectors with correct sizes, filled with 0.0
-        // These will be overwritten during forward/backward passes.
         input_cache_.resize(input_size_, 0.0);
         z_cache_.resize(output_size_, 0.0);
         activation_cache_.resize(output_size_, 0.0);
-        delta_.resize(output_size_, 0.0);
-        // dropout_mask_.resize(output_size_, 1.0); // When dropout is implemented
+        delta_.assign(output_size_, 0.0); // Ensure delta_ is also initialized properly
     }
 
     void Layer::initialize_parameters() {
         weights_.resize(output_size_, std::vector<double>(input_size_));
-        biases_.assign(output_size_, 0.0); // Initialize biases to zero
+        biases_.assign(output_size_, 0.0);
 
         double scale = 1.0;
         if (activation_type_ == "relu") {
@@ -68,21 +67,16 @@ namespace Predicting_Close_Price_Using_NN {
 
         // Cache the input data
         input_cache_ = input_data;
-
-        // Suppress unused parameter warning for training_mode if dropout is not yet implemented
         (void)training_mode;
 
-        // Calculate Z = W*X + B (pre-activation values)
-        // z_cache_ has already been resized in the constructor.
         for (int i = 0; i < output_size_; ++i) {
-            double z_neuron_i = biases_[i]; // Start with the bias
+            double z_neuron_i = biases_[i];
             for (int j = 0; j < input_size_; ++j) {
                 z_neuron_i += weights_[i][j] * input_cache_[j];
             }
             z_cache_[i] = z_neuron_i;
         }
 
-        // Apply activation function to Z to get A (activated_output)
         // activation_cache_ has already been resized.
         if (activation_type_ == "relu") {
             for (int i = 0; i < output_size_; ++i) {
@@ -97,8 +91,61 @@ namespace Predicting_Close_Price_Using_NN {
                 activation_cache_[i] = Activations::linear(z_cache_[i]);
             }
         }
-
         return activation_cache_;
+    }
+
+    std::vector<double> Layer::backward(const std::vector<double>& error_from_next_layer, double learning_rate) {
+        if (static_cast<int>(error_from_next_layer.size()) != output_size_) {
+            throw std::invalid_argument("Layer::backward - error_from_next_layer size (" + std::to_string(error_from_next_layer.size()) +
+                                        ") does not match layer output size (" + std::to_string(output_size_) + ").");
+        }
+
+        // Step 1: Calculate delta_ for this layer (dError/dZ_this_layer)
+
+        if (delta_.size() != static_cast<size_t>(output_size_)) {
+            delta_.resize(output_size_);
+        }
+
+        if (activation_type_ == "relu") {
+            for (int i = 0; i < output_size_; ++i) {
+                delta_[i] = error_from_next_layer[i] * Activations::relu_derivative(z_cache_[i]);
+            }
+        } else if (activation_type_ == "sigmoid") {
+            for (int i = 0; i < output_size_; ++i) {
+                // Sigmoid derivative uses the activated output (A)
+                delta_[i] = error_from_next_layer[i] * Activations::sigmoid_derivative(activation_cache_[i]);
+            }
+        } else if (activation_type_ == "linear") {
+            for (int i = 0; i < output_size_; ++i) {
+                delta_[i] = error_from_next_layer[i] * Activations::linear_derivative(z_cache_[i]); // which is just error_from_next_layer[i] * 1.0
+            }
+        }
+
+
+        // Step 2: Calculate error to propagate to the previous layer (dError/dA_previous_layer)
+        // error_to_prev_layer = W^T * delta_
+        std::vector<double> error_to_prev_layer(input_size_, 0.0);
+        for (int j = 0; j < input_size_; ++j) { // For each neuron in the previous layer (or input feature)
+            double sum_error_for_input_j = 0.0;
+            for (int i = 0; i < output_size_; ++i) { // Sum over neurons in this current layer
+                sum_error_for_input_j += weights_[i][j] * delta_[i];
+            }
+            error_to_prev_layer[j] = sum_error_for_input_j;
+        }
+
+        // Step 3: Calculate gradients for weights and biases
+        // Update weights (dW_ij = delta_i * input_cache_j)
+        for (int i = 0; i < output_size_; ++i) { // For each neuron in this layer
+            for (int j = 0; j < input_size_; ++j) { // For each input to this neuron
+                double dW_ij = delta_[i] * input_cache_[j];
+                weights_[i][j] -= learning_rate * dW_ij;
+            }
+            // Update bias (db_i = delta_i)
+            double db_i = delta_[i];
+            biases_[i] -= learning_rate * db_i;
+        }
+
+        return error_to_prev_layer;
     }
 
 }

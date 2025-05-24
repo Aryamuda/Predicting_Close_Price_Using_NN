@@ -4,7 +4,9 @@
 #include <cmath>
 #include <iomanip>
 #include <stdexcept>
+#include <numeric>
 #include "Layer.h"
+
 
 template<typename T, typename U>
 void assertTest(bool condition, const std::string& test_name, const T& expected, const U& actual) {
@@ -15,7 +17,7 @@ void assertTest(bool condition, const std::string& test_name, const T& expected,
                   << " | Actual: " << actual << std::endl;
     } else {
         std::cout << "Assertion PASSED: " << test_name
-                  << " | Expected: " << expected 
+                  << " | Expected: " << expected
                   << " | Actual: " << actual << std::endl;
     }
 }
@@ -52,7 +54,7 @@ void temporary_test_layer_initialization() {
             assertTest(test_layer1.weights_[0].size() == 10, "Layer 1: weights_ cols check", (size_t)10, test_layer1.weights_[0].size());
         }
         assertTest(test_layer1.biases_.size() == 5, "Layer 1: biases_ size check", (size_t)5, test_layer1.biases_.size());
-        
+
         // Print a few initial weights/biases to see they are not all zero
         if (test_layer1.output_size_ > 0 && test_layer1.input_size_ > 0 && !test_layer1.weights_.empty() && !test_layer1.weights_[0].empty()) {
             std::cout << "Layer 1: Sample initial weight w[0][0]: " << test_layer1.weights_[0][0] << std::endl;
@@ -172,7 +174,125 @@ void temporary_test_layer_forward() {
 }
 // --- End of Layer Forward Pass Test ---
 
+// --- Temporary Test for Layer Backward Pass ---
+void temporary_test_layer_backward() {
+    std::cout << "\nRunning Temporary Layer Backward Pass Test" << std::endl;
+    double epsilon = 1e-7;
+    double learning_rate = 0.1;
 
+    std::cout << "\n-- Test Case 1: 1-Input, 1-Output Linear Layer --" << std::endl;
+    try {
+        Predicting_Close_Price_Using_NN::Layer linear_layer(1, 1, "linear");
+        linear_layer.weights_ = {{0.5}}; // W_old
+        linear_layer.biases_ = {0.1};    // B_old
+        std::vector<double> input_x = {2.0};
+
+        // Perform forward pass to populate caches
+        std::vector<double> activation_a = linear_layer.forward(input_x);
+        print_vector_main("Test 1: Forward Activation A", activation_a);
+        assertTest(std::abs(activation_a[0] - 1.1) < epsilon, "Test 1: Forward pass A[0]", 1.1, activation_a[0]);
+
+        // Define incoming error and learning rate
+        std::vector<double> error_from_next = {0.2}; // dError/dA
+
+        // Store old weights and biases for checking update
+        std::vector<std::vector<double>> w_old = linear_layer.weights_;
+        std::vector<double> b_old = linear_layer.biases_;
+
+        // Perform backward pass
+        std::vector<double> error_to_prev = linear_layer.backward(error_from_next, learning_rate);
+        print_vector_main("Test 1: Backward error_to_prev", error_to_prev);
+
+        // Check delta_
+        assertTest(std::abs(linear_layer.delta_[0] - 0.2) < epsilon, "Test 1: delta_[0]", 0.2, linear_layer.delta_[0]);
+
+        // Check error_to_prev_layer
+        assertTest(error_to_prev.size() == 1, "Test 1: error_to_prev size", (size_t)1, error_to_prev.size());
+        if(error_to_prev.size() == 1) {
+            assertTest(std::abs(error_to_prev[0] - 0.1) < epsilon, "Test 1: error_to_prev[0]", 0.1, error_to_prev[0]);
+        }
+
+        // Check updated weights and biases
+        double expected_w_new = 0.46;
+        double expected_b_new = 0.08;
+        assertTest(std::abs(linear_layer.weights_[0][0] - expected_w_new) < epsilon, "Test 1: Updated weight w[0][0]", expected_w_new, linear_layer.weights_[0][0]);
+        assertTest(std::abs(linear_layer.biases_[0] - expected_b_new) < epsilon, "Test 1: Updated bias b[0]", expected_b_new, linear_layer.biases_[0]);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Linear Layer backward test (Test 1) failed: " << e.what() << std::endl;
+        assertTest(false, "Test 1: Linear Layer backward test without exceptions");
+    }
+
+
+    std::cout << "\n-- Test Case 2: 2-Inputs, 1-Output ReLU Layer --" << std::endl;
+    try {
+        Predicting_Close_Price_Using_NN::Layer relu_layer(2, 1, "relu");
+        relu_layer.weights_ = {{0.3, -0.2}};
+        relu_layer.biases_ = {0.1};
+        std::vector<double> input_x2 = {2.0, 1.0};
+
+        std::vector<double> activation_a2 = relu_layer.forward(input_x2);
+        print_vector_main("Test 2: Forward Activation A", activation_a2);
+        assertTest(std::abs(activation_a2[0] - 0.5) < epsilon, "Test 2: Forward pass A[0]", 0.5, activation_a2[0]);
+        assertTest(std::abs(relu_layer.z_cache_[0] - 0.5) < epsilon, "Test 2: Forward pass Z[0]", 0.5, relu_layer.z_cache_[0]);
+
+
+        std::vector<double> error_from_next2 = {-0.4};
+        std::vector<double> error_to_prev2 = relu_layer.backward(error_from_next2, learning_rate);
+        print_vector_main("Test 2: Backward error_to_prev", error_to_prev2);
+
+        assertTest(std::abs(relu_layer.delta_[0] - (-0.4)) < epsilon, "Test 2: delta_[0]", -0.4, relu_layer.delta_[0]);
+
+        assertTest(error_to_prev2.size() == 2, "Test 2: error_to_prev size", (size_t)2, error_to_prev2.size());
+        if(error_to_prev2.size() == 2) {
+            assertTest(std::abs(error_to_prev2[0] - (-0.12)) < epsilon, "Test 2: error_to_prev[0]", -0.12, error_to_prev2[0]);
+            assertTest(std::abs(error_to_prev2[1] - 0.08) < epsilon, "Test 2: error_to_prev[1]", 0.08, error_to_prev2[1]);
+        }
+
+        assertTest(std::abs(relu_layer.weights_[0][0] - 0.38) < epsilon, "Test 2: Updated weight w[0][0]", 0.38, relu_layer.weights_[0][0]);
+        assertTest(std::abs(relu_layer.weights_[0][1] - (-0.16)) < epsilon, "Test 2: Updated weight w[0][1]", -0.16, relu_layer.weights_[0][1]);
+        assertTest(std::abs(relu_layer.biases_[0] - 0.14) < epsilon, "Test 2: Updated bias b[0]", 0.14, relu_layer.biases_[0]);
+
+    } catch (const std::exception& e) {
+        std::cerr << "ReLU Layer backward test (Test 2) failed: " << e.what() << std::endl;
+        assertTest(false, "Test 2: ReLU Layer backward test without exceptions");
+    }
+
+    std::cout << "\n-- Test Case 3: 1-Input, 1-Output Sigmoid Layer --" << std::endl;
+    try {
+        Predicting_Close_Price_Using_NN::Layer sigmoid_layer(1, 1, "sigmoid");
+        sigmoid_layer.weights_ = {{0.8}};
+        sigmoid_layer.biases_ = {-0.2};
+        std::vector<double> input_x3 = {0.5};
+
+        std::vector<double> activation_a3 = sigmoid_layer.forward(input_x3);
+        double expected_A3 = 1.0 / (1.0 + std::exp(-0.2)); // approx 0.549834
+        print_vector_main("Test 3: Forward Activation A", activation_a3);
+        assertTest(std::abs(activation_a3[0] - expected_A3) < epsilon, "Test 3: Forward pass A[0]", expected_A3, activation_a3[0]);
+
+        std::vector<double> error_from_next3 = {0.1};
+        std::vector<double> error_to_prev3 = sigmoid_layer.backward(error_from_next3, learning_rate);
+        print_vector_main("Test 3: Backward error_to_prev", error_to_prev3);
+
+        double expected_delta3 = 0.1 * (expected_A3 * (1.0 - expected_A3)); // approx 0.024751
+        assertTest(std::abs(sigmoid_layer.delta_[0] - expected_delta3) < epsilon, "Test 3: delta_[0]", expected_delta3, sigmoid_layer.delta_[0]);
+
+        double expected_error_to_prev3 = 0.8 * expected_delta3; // approx 0.0198008
+        assertTest(std::abs(error_to_prev3[0] - expected_error_to_prev3) < epsilon, "Test 3: error_to_prev[0]", expected_error_to_prev3, error_to_prev3[0]);
+
+        double expected_w_new3 = 0.8 - learning_rate * (expected_delta3 * 0.5); // approx 0.79876245
+        double expected_b_new3 = -0.2 - learning_rate * expected_delta3;      // approx -0.2024751
+        assertTest(std::abs(sigmoid_layer.weights_[0][0] - expected_w_new3) < epsilon, "Test 3: Updated weight w[0][0]", expected_w_new3, sigmoid_layer.weights_[0][0]);
+        assertTest(std::abs(sigmoid_layer.biases_[0] - expected_b_new3) < epsilon, "Test 3: Updated bias b[0]", expected_b_new3, sigmoid_layer.biases_[0]);
+
+    } catch (const std::exception& e) {
+        std::cerr << "Sigmoid Layer backward test (Test 3) failed: " << e.what() << std::endl;
+        assertTest(false, "Test 3: Sigmoid Layer backward test without exceptions");
+    }
+
+
+}
+// --- End of Layer Backward Pass Test ---
 
 int main() {
     std::cout << "Initializing main..." << std::endl;
@@ -184,6 +304,11 @@ int main() {
     std::cout << "\nRunning Layer Forward Pass Tests" << std::endl;
     temporary_test_layer_forward();
     std::cout << "Layer Forward Pass Tests Complete" << std::endl << std::endl;
+
+    std::cout << "\nRunning Layer Backward Pass Tests" << std::endl;
+    temporary_test_layer_backward();
+    std::cout << "\nBackward Pass Tests Complete" << std::endl << std::endl;
+    // --- End of Temporary Test Calls ---
 
     return 0;
 }
