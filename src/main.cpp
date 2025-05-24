@@ -6,6 +6,7 @@
 #include "Activations.h"
 #include <cmath>
 #include <iomanip>
+#include "Loss.h"
 
 // Vector
 void print_vector(const std::string& name, const std::vector<double>& vec) {
@@ -81,8 +82,46 @@ void temporary_test_activations() {
 }
 // --- End of Activations Test Functions ---
 
+// --- Temporary Test Functions for Loss ---
+void temporary_test_loss() {
+    std::cout << "\n--- Running Temporary Loss Tests ---" << std::endl;
+    double epsilon = 1e-9; // Comparing doubles
 
+    // Test Case 1: Perfect prediction
+    double y_true1 = 10.0;
+    double y_pred1 = 10.0;
+    double expected_mse1 = 0.0;
+    double actual_mse1 = Loss::mean_squared_error(y_true1, y_pred1);
+    assertTest(std::abs(actual_mse1 - expected_mse1) < epsilon, "Loss::mean_squared_error (perfect prediction)", expected_mse1, actual_mse1);
 
+    double expected_mse_deriv1 = 0.0;
+    double actual_mse_deriv1 = Loss::mean_squared_error_derivative(y_true1, y_pred1);
+    assertTest(std::abs(actual_mse_deriv1 - expected_mse_deriv1) < epsilon, "Loss::mean_squared_error_derivative (perfect prediction)", expected_mse_deriv1, actual_mse_deriv1);
+
+    // Test Case 2: Prediction is higher
+    double y_true2 = 5.0;
+    double y_pred2 = 7.0;
+    double expected_mse2 = 0.5 * std::pow(7.0 - 5.0, 2);
+    double actual_mse2 = Loss::mean_squared_error(y_true2, y_pred2);
+    assertTest(std::abs(actual_mse2 - expected_mse2) < epsilon, "Loss::mean_squared_error (prediction higher)", expected_mse2, actual_mse2);
+
+    double expected_mse_deriv2 = 2.0;
+    double actual_mse_deriv2 = Loss::mean_squared_error_derivative(y_true2, y_pred2);
+    assertTest(std::abs(actual_mse_deriv2 - expected_mse_deriv2) < epsilon, "Loss::mean_squared_error_derivative (prediction higher)", expected_mse_deriv2, actual_mse_deriv2);
+
+    // Test Case 3: Prediction is lower
+    double y_true3 = 12.0;
+    double y_pred3 = 8.0;
+    double expected_mse3 = 0.5 * std::pow(8.0 - 12.0, 2);
+    double actual_mse3 = Loss::mean_squared_error(y_true3, y_pred3);
+    assertTest(std::abs(actual_mse3 - expected_mse3) < epsilon, "Loss::mean_squared_error (prediction lower)", expected_mse3, actual_mse3);
+
+    double expected_mse_deriv3 = -4.0;
+    double actual_mse_deriv3 = Loss::mean_squared_error_derivative(y_true3, y_pred3);
+    assertTest(std::abs(actual_mse_deriv3 - expected_mse_deriv3) < epsilon, "Loss::mean_squared_error_derivative (prediction lower)", expected_mse_deriv3, actual_mse_deriv3);
+
+}
+// --- End of Loss Test Functions ---
 
 
 int main() {
@@ -119,8 +158,14 @@ int main() {
     // --- Temporary Tests for Activations ---
     std::cout << "\nTesting Activations" << std::endl;
     temporary_test_activations();
-    std::cout << "Activations Tests Completed" << std::endl << std::endl;
+    std::cout << "\nActivations Tests Completed" << std::endl << std::endl;
     // --- End of Activations Test Calls ---
+
+    // -- Temporary Tests for Loss
+    std::cout << "\nTesting Loss" << std::endl;
+    temporary_test_loss();
+    std::cout << "\nLoss Tests Complete" << std::endl << std::endl;
+    // --- End of Temporary Test Loss ---
 
 
 
