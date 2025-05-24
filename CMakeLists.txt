@@ -5,7 +5,9 @@ set(CMAKE_CXX_STANDARD 20)
 
 add_executable(Predicting_Close_Price_Using_NN src/main.cpp
         include/Utils.h
-        src/Utils.cpp)
+        src/Utils.cpp
+        include/Activations.h
+        src/Activations.cpp)
 
 # Specify  directories
 include_directories(include)
