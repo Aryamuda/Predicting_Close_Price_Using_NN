@@ -21,7 +21,8 @@ namespace Predicting_Close_Price_Using_NN {
 
         // --- Methods ---
         std::vector<double> predict(const std::vector<double>& input_data, bool training_mode = false);
-                       const std::vector<double>& y_test_prices);
+
+        void train_one_sample(const std::vector<double>& x_input, double y_true_price);
 
         // Helper to get number of layers
         size_t get_num_layers() const { return layers_.size(); }
