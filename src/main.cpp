@@ -4,17 +4,14 @@
 #include <cmath>
 #include <iomanip>
 #include <stdexcept>
-#include <numeric>
+#include <algorithm>
 #include <random>
+#include "CSVReader.h"
 
-#include "Loss.h"
-#include "NeuralNetwork.h"
 
-// --- Temporary Test Code / Helpers ---
-
-template<typename T, typename U>
+template<typename T, typename U> // Use two template parameters for flexibility
 void assertTest(bool condition, const std::string& test_name, const T& expected, const U& actual) {
-    std::cout << std::fixed << std::setprecision(5);
+    std::cout << std::fixed << std::setprecision(5); // Adjusted precision for float output
     if (!condition) {
         std::cerr << "ASSERTION FAILED: " << test_name
                   << " | Expected: " << expected
@@ -44,100 +41,93 @@ void print_vector_main(const std::string& name, const std::vector<double>& vec) 
     std::cout << " ]" << std::endl;
 }
 
-
-// --- MVP: Train on a Toy Regression Problem ---
-void train_on_toy_regression_problem() {
-    std::cout << "\n--- Training NeuralNetwork on a Toy Regression Problem ---" << std::endl;
-
-    // Toy Dataset: y = 2x + 1 (approximately, with some small variations or simple points)
-    // Inputs (features) are single values.
-    std::vector<std::vector<double>> X_train_toy = {
-        {0.0}, {0.2}, {0.4}, {0.6}, {0.8}, {1.0}
-    };
-    // Corresponding target prices
-    std::vector<double> y_train_toy = {
-        1.0,   1.4,   1.8,   2.2,   2.6,   3.0
-    };
-
-    // Network Architecture: 1 input -> 5 hidden ReLU neurons -> 1 linear output neuron
-    std::vector<int> layer_sizes = {1, 5, 1}; // Input:1, Hidden:5, Output:1
-    std::vector<std::string> activations = {"relu", "linear"};
-    double learning_rate = 0.05; // Might need tuning
-    double dropout_rate = 0.0;   // No dropout for this simple test
-
-    Predicting_Close_Price_Using_NN::NeuralNetwork nn(layer_sizes, activations, learning_rate, dropout_rate);
-
-    int num_epochs = 2000; // Number of times to iterate over the entire dataset
-    int print_every_n_epochs = 200;
-
-    std::cout << "Starting training on toy data..." << std::endl;
-    std::cout << "Network: 1 input -> 5 ReLU hidden -> 1 Linear output" << std::endl;
-    std::cout << "Learning Rate: " << learning_rate << ", Epochs: " << num_epochs << std::endl;
-
-    // For shuffling data each epoch
-    std::vector<size_t> indices(X_train_toy.size());
-    std::iota(indices.begin(), indices.end(), 0); // Fill with 0, 1, 2, ...
-    std::random_device rd;
-    std::mt19937 g(rd());
-
-
-    for (int epoch = 0; epoch < num_epochs; ++epoch) {
-
-        double current_epoch_total_loss = 0.0;
-
-        for (size_t i = 0; i < X_train_toy.size(); ++i) {
-            size_t current_idx = i; // Or indices[i] if shuffling
-            const auto& x_sample = X_train_toy[current_idx];
-            double y_true_sample = y_train_toy[current_idx];
-
-            // Get prediction before training to calculate loss for this sample
-            std::vector<double> y_pred_vec_before_train = nn.predict(x_sample, false); // training_mode=false for loss calc
-            double y_pred_before_train = y_pred_vec_before_train[0];
-            current_epoch_total_loss += Loss::mean_squared_error(y_true_sample, y_pred_before_train);
-
-            // Train on this sample
-            nn.train_one_sample(x_sample, y_true_sample);
-        }
-
-        double average_epoch_loss = current_epoch_total_loss / X_train_toy.size();
-
-        if ((epoch + 1) % print_every_n_epochs == 0 || epoch == 0) {
-            std::cout << "Epoch " << std::setw(4) << (epoch + 1) << "/" << num_epochs
-                      << " | Average MSE Loss: " << std::fixed << std::setprecision(8) << average_epoch_loss
-                      << std::endl;
-        }
+void print_features_summary(const std::string& name, const std::vector<std::vector<double>>& features, int num_rows_to_print = 3) {
+    std::cout << name << " (Summary - first " << num_rows_to_print << " rows if available):" << std::endl;
+    if (features.empty()) {
+        std::cout << "  <No features loaded>" << std::endl;
+        return;
     }
-
-    std::cout << "\nTraining on toy data complete." << std::endl;
-
-    // Test predictions after training
-    std::cout << "\nPredictions on toy data after training:" << std::endl;
-    std::cout << std::setw(10) << "Input (x)" << std::setw(15) << "True (y)" << std::setw(18) << "Predicted (y_hat)" << std::setw(18) << "Abs Difference" << std::endl;
-    std::cout << "------------------------------------------------------------------" << std::endl;
-    for (size_t i = 0; i < X_train_toy.size(); ++i) {
-        std::vector<double> y_pred_vec = nn.predict(X_train_toy[i], false); // training_mode=false for prediction
-        double y_pred = y_pred_vec[0];
-        double diff = std::abs(y_pred - y_train_toy[i]);
-        std::cout << std::fixed << std::setprecision(5)
-                  << std::setw(10) << X_train_toy[i][0]
-                  << std::setw(15) << y_train_toy[i]
-                  << std::setw(18) << y_pred
-                  << std::setw(18) << diff
-                  << std::endl;
+    std::cout << "  Total samples: " << features.size() << std::endl;
+    if (!features.empty()) {
+        std::cout << "  Features per sample: " << features[0].size() << std::endl;
+    }
+    for (int i = 0; i < std::min((int)features.size(), num_rows_to_print); ++i) {
+        print_vector_main("  Sample " + std::to_string(i), features[i]);
     }
 }
-// --- End of MVP Test ---
+
+
+// --- Temporary Test for CSVReader ---
+void temporary_test_csv_reader() {
+    std::cout << "\n--- Running Temporary CSVReader Test ---" << std::endl;
+
+    std::string filename = "XAUUSD.csv";
+    std::vector<std::vector<double>> features;
+    std::vector<double> target_prices;
+    int target_column_idx = 4; //'Close' is the 4th column (0-indexed)
+
+    std::cout << "Attempting to read data from: " << filename << std::endl;
+    std::cout << "Target column index: " << target_column_idx << std::endl;
+
+    try {
+        Predicting_Close_Price_Using_NN::CSVReader::read_regression_data(filename, features, target_prices, target_column_idx);
+
+        std::cout << "\nCSV Data Loaded Successfully:" << std::endl;
+        std::cout << "Number of samples loaded: " << features.size() << std::endl;
+        assertTest(features.size() == 5, "CSVReader: Correct number of samples loaded");
+        assertTest(target_prices.size() == features.size(), "CSVReader: Features and targets count match");
+
+        if (!features.empty()) {
+            std::cout << "Number of features per sample (excluding target): " << features[0].size() << std::endl;
+            // Original CSV has 5 columns. Target is 1 column. So features should be 5-1=4.
+            assertTest(features[0].size() == 4, "CSVReader: Correct number of features per sample");
+        }
+
+        std::cout << "\nFirst few loaded features:" << std::endl;
+        print_features_summary("Features", features, 3);
+
+        std::cout << "\nFirst few loaded target prices:" << std::endl;
+        std::vector<double> target_prices_subset;
+        for(int i=0; i < std::min((int)target_prices.size(), 3); ++i) {
+            target_prices_subset.push_back(target_prices[i]);
+        }
+        print_vector_main("Targets (subset)", target_prices_subset);
+
+        // Specific checks based on the sample_price_data.csv
+        if (features.size() >= 1 && !features[0].empty() && target_prices.size() >=1) { // Added !features[0].empty()
+            if (features[0].size() >= 4) { // Check inner vector size before accessing
+                assertTest(std::abs(features[0][0] - 1.0) < 1e-7, "CSVReader: features[0][0] value", 1.0, features[0][0]);
+                assertTest(std::abs(features[0][1] - 2.0) < 1e-7, "CSVReader: features[0][1] value", 2.0, features[0][1]);
+                assertTest(std::abs(features[0][2] - 3.0) < 1e-7, "CSVReader: features[0][2] value", 3.0, features[0][2]);
+                assertTest(std::abs(features[0][3] - 0.1) < 1e-7, "CSVReader: features[0][3] value (was Feature4)", 0.1, features[0][3]);
+            } else {
+                 assertTest(false, "CSVReader: features[0] does not have enough columns for detailed check.");
+            }
+            assertTest(std::abs(target_prices[0] - 100.5) < 1e-7, "CSVReader: target_prices[0] value", 100.5, target_prices[0]);
+        }
+         if (features.size() >= 2 && !features[1].empty() && target_prices.size() >=2) { // Added !features[1].empty()
+            // Second row features: 1.1, 2.1, 3.1, 0.2 (Target was 101.2)
+            // No need to check features[1] values again if structure is okay
+            assertTest(std::abs(target_prices[1] - 101.2) < 1e-7, "CSVReader: target_prices[1] value", 101.2, target_prices[1]);
+        }
+
+
+    } catch (const std::exception& e) {
+        std::cerr << "CSVReader test failed with exception: " << e.what() << std::endl;
+        assertTest(false, "CSVReader: Data loading without exceptions");
+    }
+
+}
+// --- End of CSVReader Test ---
 
 
 int main() {
     std::cout << "Initializing main..." << std::endl;
 
-
-    std::cout << "\nRunning MVP: Training on Toy Regression Problem" << std::endl;
-    train_on_toy_regression_problem();
-    std::cout << "MVP: Toy Regression Problem Training Completed" << std::endl << std::endl;
+    std::cout << "\nRunning Temporary CSVReader Tests" << std::endl;
+    temporary_test_csv_reader();
+    std::cout << "CSVReader Tests Complete" << std::endl << std::endl;
     // --- End of Temporary Test Calls ---
-
 
 
     return 0;

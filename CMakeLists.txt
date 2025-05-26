@@ -13,7 +13,9 @@ add_executable(Predicting_Close_Price_Using_NN src/main.cpp
         include/Layer.h
         src/Layer.cpp
         include/NeuralNetwork.h
-        src/NeuralNetwork.cpp)
+        src/NeuralNetwork.cpp
+        include/CSVReader.h
+        src/CSVReader.cpp)
 
 # Specify  directories
 include_directories(include)
