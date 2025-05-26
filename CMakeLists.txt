@@ -24,3 +24,9 @@ include_directories(include)
 # Confirm CMake configuration
 message(STATUS "CMake configuration complete for PricePredictorNN.")
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
+
+configure_file(
+        "${CMAKE_SOURCE_DIR}/XAUUSD.csv"
+        "${CMAKE_CURRENT_BINARY_DIR}/XAUUSD.csv"
+        COPYONLY
+)

@@ -1,16 +1,22 @@
 #ifndef LOSS_HPP
 #define LOSS_HPP
 
+#include <vector>
+#include <string>
 
-namespace Loss {
+namespace Predicting_Close_Price_Using_NN {
 
-    // MSE for single prediction:
-    // y_true target value
-    // y_pred predicted value
-    double mean_squared_error(double y_true, double y_pred);
+    namespace Loss {
 
-    // Calculates the derivative of the MSE loss with respect to the predicted value (y_pred):
-    double mean_squared_error_derivative(double y_true, double y_pred);
+        // Calculates MSE for single pred
+        // Formula: 0.5 * (y_pred - y_true)^2
+        double mean_squared_error(double y_true, double y_pred);
+
+
+        //Formula: y_pred - y_true (due to the 0.5 factor in the MSE formula)
+        double mean_squared_error_derivative(double y_true, double y_pred);
+
+    }
 
 }
 
