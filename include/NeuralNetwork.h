@@ -3,14 +3,16 @@
 
 #include <vector>
 #include <string>
+#include <stdexcept>
 #include "Layer.h"
+#include "Loss.h"
 
 namespace Predicting_Close_Price_Using_NN {
 
     class NeuralNetwork {
     public:
         // Variables
-        std::vector<Layer> layers_; // Stores all layers in the network
+        std::vector<Layer> layers_;
         double learning_rate_;
 
         // --- Constructor ---
@@ -24,8 +26,20 @@ namespace Predicting_Close_Price_Using_NN {
 
         void train_one_sample(const std::vector<double>& x_input, double y_true_price);
 
+        void train(const std::vector<std::vector<double>>& X_train,
+                   const std::vector<double>& y_train,
+                   int epochs,
+                   int print_every_n_epochs = 10,
+                   const std::vector<std::vector<double>>& X_val = {},
+                   const std::vector<double>& y_val = {});
+
+
+        double evaluate_regression(const std::vector<std::vector<double>>& X_data,
+                                   const std::vector<double>& y_true_targets);
+
         // Helper to get number of layers
         size_t get_num_layers() const { return layers_.size(); }
+
 
     };
 

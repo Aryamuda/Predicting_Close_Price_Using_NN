@@ -2,6 +2,10 @@
 #include "Loss.h"
 #include <iostream>
 #include <stdexcept>
+#include <numeric>
+#include <algorithm>
+#include <random>
+#include <iomanip>
 
 namespace Predicting_Close_Price_Using_NN {
 
@@ -49,12 +53,10 @@ namespace Predicting_Close_Price_Using_NN {
         if (layers_.empty()) {
             throw std::runtime_error("NeuralNetwork::predict - Network has no layers.");
         }
-
         if (static_cast<int>(input_data.size()) != layers_[0].input_size_) {
             throw std::invalid_argument("NeuralNetwork::predict - Input data size (" + std::to_string(input_data.size()) +
                                         ") does not match network's input layer size (" + std::to_string(layers_[0].input_size_) + ").");
         }
-
         std::vector<double> current_output = input_data;
         for (size_t i = 0; i < layers_.size(); ++i) {
             current_output = layers_[i].forward(current_output, training_mode);
@@ -75,26 +77,115 @@ namespace Predicting_Close_Price_Using_NN {
             throw std::runtime_error("NeuralNetwork::train_one_sample - Expected a single output value from network for regression.");
         }
         double y_pred_price = y_pred_vector[0];
-
-        // 2. Calculate the derivative of the loss function with respect to the network's output (prediction)
-        // For MSE = 0.5 * (y_pred - y_true)^2, derivative w.r.t y_pred is (y_pred - y_true)
         double loss_derivative = Loss::mean_squared_error_derivative(y_true_price, y_pred_price);
-
-        // This loss_derivative is dError/dActivation_output_layer.
-        // It needs to be a vector to pass to the last layer's backward method.
         std::vector<double> error_signal_from_loss = {loss_derivative};
-
-        // 3. Backward pass through all layers
-        // Start with the error signal from the loss function for the output layer
         std::vector<double> current_error_signal = error_signal_from_loss;
-
         for (int i = static_cast<int>(layers_.size()) - 1; i >= 0; --i) {
-            // The backward method of a layer returns the error signal for the *previous* layer (its input)
             current_error_signal = layers_[i].backward(current_error_signal, learning_rate_);
         }
+    }
 
+    void NeuralNetwork::train(
+        const std::vector<std::vector<double>>& X_train,
+        const std::vector<double>& y_train,
+        int epochs,
+        int print_every_n_epochs,
+        const std::vector<std::vector<double>>& X_val, // Optional validation data
+        const std::vector<double>& y_val) {           // Optional validation data
+
+        if (X_train.size() != y_train.size()) {
+            throw std::invalid_argument("NeuralNetwork::train - X_train and y_train must have the same number of samples.");
+        }
+        if (X_train.empty()) {
+            std::cout << "Warning: NeuralNetwork::train called with empty training dataset." << std::endl;
+            return;
+        }
+        if (epochs <= 0) {
+            std::cout << "Warning: NeuralNetwork::train called with non-positive epochs. No training will occur." << std::endl;
+            return;
+        }
+        bool has_validation_data = !X_val.empty() && !y_val.empty();
+        if (has_validation_data && (X_val.size() != y_val.size())) {
+             throw std::invalid_argument("NeuralNetwork::train - X_val and y_val must have the same number of samples if validation data is provided.");
+        }
+
+
+        std::cout << "Starting Neural Network training..." << std::endl;
+        std::cout << " - Training samples: " << X_train.size() << std::endl;
+        if(has_validation_data) {
+            std::cout << " - Validation samples: " << X_val.size() << std::endl;
+        }
+        std::cout << " - Epochs: " << epochs << std::endl;
+        std::cout << " - Learning rate: " << learning_rate_ << std::endl;
+
+
+        for (int epoch = 0; epoch < epochs; ++epoch) {
+
+            // Iterate through training data sequentially (important for time series)
+            for (size_t i = 0; i < X_train.size(); ++i) {
+                // size_t current_idx = shuffle_each_epoch ? indices[i] : i;
+                size_t current_idx = i; // No shuffling for time series by default
+
+                if (X_train[current_idx].empty() || static_cast<int>(X_train[current_idx].size()) != layers_[0].input_size_) {
+                     std::cerr << "Warning: NeuralNetwork::train - Skipping training sample " << current_idx
+                               << " in epoch " << epoch + 1 << " due to incorrect feature size." << std::endl;
+                    continue;
+                }
+                train_one_sample(X_train[current_idx], y_train[current_idx]);
+            }
+
+            // Print progress
+            if (print_every_n_epochs > 0 && ((epoch + 1) % print_every_n_epochs == 0 || epoch == 0 || epoch == epochs - 1)) {
+                double train_mse = evaluate_regression(X_train, y_train);
+                std::cout << "Epoch " << std::setw(4) << (epoch + 1) << "/" << epochs
+                          << " | Train MSE (Norm): " << std::fixed << std::setprecision(8) << train_mse;
+
+                if (has_validation_data) {
+                    double val_mse = evaluate_regression(X_val, y_val);
+                    std::cout << " | Val MSE (Norm): " << std::fixed << std::setprecision(8) << val_mse;
+                }
+                std::cout << std::endl;
+            }
+        }
+        std::cout << "Neural Network training complete." << std::endl;
     }
 
 
+    double NeuralNetwork::evaluate_regression(
+        const std::vector<std::vector<double>>& X_data,
+        const std::vector<double>& y_true_targets) {
+
+        if (X_data.size() != y_true_targets.size()) {
+            throw std::invalid_argument("evaluate_regression: X_data and y_true_targets must have the same number of samples.");
+        }
+        if (X_data.empty()) {
+            return 0.0;
+        }
+        if (layers_.empty()) {
+            throw std::runtime_error("evaluate_regression: Network has no layers to make predictions.");
+        }
+
+        double total_squared_error = 0.0;
+        int valid_predictions = 0;
+
+        for (size_t i = 0; i < X_data.size(); ++i) {
+            if (X_data[i].empty() || static_cast<int>(X_data[i].size()) != layers_[0].input_size_) {
+                continue;
+            }
+            std::vector<double> y_pred_vec = predict(X_data[i], false);
+            if (y_pred_vec.size() != 1) {
+                continue;
+            }
+            double y_pred = y_pred_vec[0];
+            double error = y_pred - y_true_targets[i];
+            total_squared_error += error * error;
+            valid_predictions++;
+        }
+
+        if (valid_predictions == 0) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        return total_squared_error / static_cast<double>(valid_predictions);
+    }
 
 }

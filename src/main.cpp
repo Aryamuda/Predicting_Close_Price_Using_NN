@@ -7,7 +7,8 @@
 #include <numeric>
 #include <algorithm>
 #include <limits>
-
+#include "Utils.h"
+#include "Activations.h"
 #include "Loss.h"
 #include "Layer.h"
 #include "NeuralNetwork.h"
@@ -69,14 +70,14 @@ std::vector<MinMaxVals> normalize_all_features_min_max(std::vector<std::vector<d
         double max_v = feature_scaling_params[j].max_val;
         double range = max_v - min_v;
         if (std::abs(range) < 1e-9) {
-            for (size_t i = 0; i < num_samples; ++i) features[i][j] = 0.0;
+            for (size_t i = 0; i < num_samples; ++i) features[i][j] = 0.0; // Or 0.5, or handle as constant
         } else {
             for (size_t i = 0; i < num_samples; ++i) features[i][j] = (features[i][j] - min_v) / range;
         }
     }
     return feature_scaling_params;
 }
-MinMaxVals normalize_target_variable_min_max(std::vector<double>& target_variable) { /* ... (implementation from previous step) ... */
+MinMaxVals normalize_target_variable_min_max(std::vector<double>& target_variable) {
     if (target_variable.empty()) { return {}; }
     MinMaxVals target_scaling_params;
     target_scaling_params.min_val = *std::min_element(target_variable.begin(), target_variable.end());
@@ -85,19 +86,20 @@ MinMaxVals normalize_target_variable_min_max(std::vector<double>& target_variabl
     double max_v = target_scaling_params.max_val;
     double range = max_v - min_v;
     if (std::abs(range) < 1e-9) {
-        for (size_t i = 0; i < target_variable.size(); ++i) target_variable[i] = 0.0;
+        for (size_t i = 0; i < target_variable.size(); ++i) target_variable[i] = 0.0; // Or 0.5
     } else {
         for (size_t i = 0; i < target_variable.size(); ++i) target_variable[i] = (target_variable[i] - min_v) / range;
     }
     return target_scaling_params;
 }
-double denormalize_target_value_min_max(double normalized_value, const MinMaxVals& scaling_params) { /* ... (implementation from previous step) ... */
+double denormalize_target_value_min_max(double normalized_value, const MinMaxVals& scaling_params) {
     double range = scaling_params.max_val - scaling_params.min_val;
     if (std::abs(range) < 1e-9) return scaling_params.min_val;
     return normalized_value * range + scaling_params.min_val;
 }
 
 
+//Time-Series Data Splitting Function
 void time_series_split(
     const std::vector<std::vector<double>>& all_features,
     const std::vector<double>& all_targets,
@@ -124,21 +126,25 @@ void time_series_split(
     size_t validation_count = static_cast<size_t>(static_cast<double>(total_samples) * validation_ratio);
     size_t training_count = total_samples - validation_count;
 
-    if (training_count == 0 || validation_count == 0) {
-        std::cerr << "Warning: Time-series split resulted in an empty training or validation set. Adjust ratio or dataset size." << std::endl;
-        // Default to using all for training if one set is empty due to small dataset/ratio
-        if (training_count == 0 && total_samples > 0) {
-             training_count = total_samples;
-             validation_count = 0;
-        } else if (validation_count == 0 && total_samples > 0) {
-            // This case is less problematic
+    if (training_count == 0 || (validation_count > 0 && validation_count == total_samples) ) { // ensure training_count > 0
+        std::cerr << "Warning: Time-series split resulted in an empty training set or all data as validation. Adjust ratio or dataset size." << std::endl;
+        if (total_samples > 10) { // Arbitrary threshold: if more than 10 samples, try to make a small val set
+            validation_count = std::max((size_t)1, static_cast<size_t>(total_samples * 0.1)); // e.g. 10% or at least 1
+            training_count = total_samples - validation_count;
+            if (training_count == 0) { // Still bad
+                 training_count = total_samples; validation_count = 0; // All to training
+            }
+        } else {
+            training_count = total_samples;
+            validation_count = 0;
         }
+         std::cout << "Adjusted split: Train=" << training_count << ", Val=" << validation_count << std::endl;
     }
 
     train_features.assign(all_features.begin(), all_features.begin() + training_count);
     train_targets.assign(all_targets.begin(), all_targets.begin() + training_count);
 
-    if (validation_count > 0) {
+    if (validation_count > 0 && training_count > 0) { // Ensure training_count is also > 0 for val_features assignment
         val_features.assign(all_features.begin() + training_count, all_features.end());
         val_targets.assign(all_targets.begin() + training_count, all_targets.end());
     } else {
@@ -152,37 +158,57 @@ void time_series_split(
 }
 
 
-//Main Training Function
-void run_training_and_evaluation() {
-    std::cout << "\n--- Neural Network Training and Evaluation ---" << std::endl;
+// --- Main Training and Evaluation Orchestrator ---
+void run_main_training_pipeline() {
+    std::cout << "\n--- Neural Network Training Pipeline ---" << std::endl;
 
-    std::string filename = "XAUUSD.csv"; // Filename
-    std::vector<std::vector<double>> features_all;
-    std::vector<double> target_prices_all;
-    int target_column_idx = 3; // Close column index
+    std::string filename = "XAUUSD.csv";
+    std::vector<std::vector<double>> features_all_original; // To store original unnormalized features
+    std::vector<double> target_prices_all_original;         // To store original unnormalized targets
+    std::vector<std::vector<double>> features_all_norm;     // For normalized features
+    std::vector<double> target_prices_all_norm;           // For normalized targets
+    int target_column_idx = 3;
 
     try {
-        Predicting_Close_Price_Using_NN::CSVReader::read_regression_data(filename, features_all, target_prices_all, target_column_idx);
-        std::cout << "Successfully loaded " << features_all.size() << " samples from " << filename << "." << std::endl;
-        if (features_all.empty()) { std::cerr << "No data loaded. Exiting." << std::endl; return; }
+        // Load original data first
+        Predicting_Close_Price_Using_NN::CSVReader::read_regression_data(filename, features_all_original, target_prices_all_original, target_column_idx);
+        std::cout << "Successfully loaded " << features_all_original.size() << " original samples from " << filename << "." << std::endl;
+        if (features_all_original.empty()) { std::cerr << "No data loaded. Exiting." << std::endl; return; }
+
+        // Create copies for normalization
+        features_all_norm = features_all_original;
+        target_prices_all_norm = target_prices_all_original;
+
     } catch (const std::exception& e) {
         std::cerr << "Error loading CSV data: " << e.what() << std::endl; return;
     }
 
-    // Normalize features and target
-    std::vector<MinMaxVals> feature_scaling_info = normalize_all_features_min_max(features_all);
-    MinMaxVals target_scaling_info = normalize_target_variable_min_max(target_prices_all);
+    // Normalize features and target (working on the copies)
+    std::cout << "\nNormalizing features and target variable..." << std::endl;
+    std::vector<MinMaxVals> feature_scaling_info = normalize_all_features_min_max(features_all_norm);
+    MinMaxVals target_scaling_info = normalize_target_variable_min_max(target_prices_all_norm);
 
-    //Split data into training and validation sets
-    std::vector<std::vector<double>> X_train, X_val;
-    std::vector<double> y_train, y_val;
-    double validation_split_ratio = 0.2; // Use 20% for validation
-    time_series_split(features_all, target_prices_all, X_train, y_train, X_val, y_val, validation_split_ratio);
+    std::cout << "Normalization complete." << std::endl;
+    std::cout << "Target scaling (used for normalization): min=" << target_scaling_info.min_val << ", max=" << target_scaling_info.max_val << std::endl;
+    // print_features_summary("Normalized Features (sample)", features_all_norm, 3, 5);
+    // print_vector_main("Normalized Targets (sample)", target_prices_all_norm, 5);
 
-    if (X_train.empty()) { std::cerr << "Training set is empty after split. Exiting." << std::endl; return; }
+    // Split normalized data into training and validation sets
+    std::vector<std::vector<double>> X_train_norm, X_val_norm;
+    std::vector<double> y_train_norm, y_val_norm;
+    double validation_split_ratio = 0.2;
+    time_series_split(features_all_norm, target_prices_all_norm, X_train_norm, y_train_norm, X_val_norm, y_val_norm, validation_split_ratio);
 
-    int input_dim = static_cast<int>(X_train[0].size());
-    std::vector<int> layer_sizes = {input_dim, 64, 32, 1};
+    // Also split original (unnormalized) data for final denormalized evaluation
+    std::vector<std::vector<double>> X_train_orig, X_val_orig; // Features not strictly needed for this part
+    std::vector<double> y_train_orig, y_val_orig;
+    time_series_split(features_all_original, target_prices_all_original, X_train_orig, y_train_orig, X_val_orig, y_val_orig, validation_split_ratio);
+
+
+    if (X_train_norm.empty()) { std::cerr << "Normalized training set is empty after split. Exiting." << std::endl; return; }
+
+    int input_dim = static_cast<int>(X_train_norm[0].size());
+    std::vector<int> layer_sizes = {input_dim, 64, 32, 1}; // Example architecture
     std::vector<std::string> activations = {"relu", "relu", "linear"};
     double learning_rate = 0.001;
     double dropout_rate = 0.1;
@@ -190,78 +216,54 @@ void run_training_and_evaluation() {
     Predicting_Close_Price_Using_NN::NeuralNetwork nn(layer_sizes, activations, learning_rate, dropout_rate);
 
     int num_epochs = 200;
-    int print_every_n_epochs = 10;
+    int print_every_n_epochs = 20; // Print progress less frequently
 
-    std::cout << "\nStarting training on " << X_train.size() << " training samples."
-              << (X_val.empty() ? "" : " Validating on " + std::to_string(X_val.size()) + " samples.") << std::endl;
+    // --- Use NeuralNetwork::train method ---
+    nn.train(X_train_norm, y_train_norm, num_epochs, print_every_n_epochs, X_val_norm, y_val_norm);
 
-    for (int epoch = 0; epoch < num_epochs; ++epoch) {
-        double train_epoch_loss_norm = 0.0;
-        for (size_t i = 0; i < X_train.size(); ++i) {
-            // (Error checking for X_train[i] as before)
-            std::vector<double> y_pred_vec_norm = nn.predict(X_train[i], false);
-            if(y_pred_vec_norm.empty()) continue;
-            train_epoch_loss_norm += Predicting_Close_Price_Using_NN::Loss::mean_squared_error(y_train[i], y_pred_vec_norm[0]);
-            nn.train_one_sample(X_train[i], y_train[i]);
-        }
-        train_epoch_loss_norm /= X_train.size();
+    // --- Final Evaluation (Normalized MSE) ---
+    std::cout << "\n--- Final Evaluation Metrics (on Normalized Data) ---" << std::endl;
+    double final_train_mse_norm = nn.evaluate_regression(X_train_norm, y_train_norm);
+    std::cout << "Final Training MSE (Normalized): " << std::fixed << std::setprecision(8) << final_train_mse_norm << std::endl;
 
-        if ((epoch + 1) % print_every_n_epochs == 0 || epoch == 0 || epoch == num_epochs - 1) {
-            std::cout << "Epoch " << std::setw(4) << (epoch + 1) << "/" << num_epochs
-                      << " | Train MSE (Norm): " << std::fixed << std::setprecision(8) << train_epoch_loss_norm;
-
-            // Basic validation loss
-            if (!X_val.empty()) {
-                double val_epoch_loss_norm = 0.0;
-                for (size_t i = 0; i < X_val.size(); ++i) {
-                     if (X_val[i].empty() || static_cast<int>(X_val[i].size()) != input_dim) continue;
-                     std::vector<double> y_val_pred_vec_norm = nn.predict(X_val[i], false);
-                     if(y_val_pred_vec_norm.empty()) continue;
-                     val_epoch_loss_norm += Predicting_Close_Price_Using_NN::Loss::mean_squared_error(y_val[i], y_val_pred_vec_norm[0]);
-                }
-                val_epoch_loss_norm /= X_val.size();
-                 std::cout << " | Val MSE (Norm): " << std::fixed << std::setprecision(8) << val_epoch_loss_norm;
-            }
-            std::cout << std::endl;
-        }
+    if (!X_val_norm.empty()) {
+        double final_val_mse_norm = nn.evaluate_regression(X_val_norm, y_val_norm);
+        std::cout << "Final Validation MSE (Normalized): " << std::fixed << std::setprecision(8) << final_val_mse_norm << std::endl;
     }
 
-    // Simple evaluation on first few validation samples (denormalized)
+    // --- Predictions on first few validation samples (denormalized) ---
     std::cout << "\nPredictions on first few validation samples (denormalized):" << std::endl;
-    std::cout << std::setw(18) << "True (Original)" << std::setw(20) << "Predicted (DeNorm)" << std::endl;
-    std::cout << "---------------------------------------------------------" << std::endl;
+    std::cout << std::setw(18) << "True (Original)" << std::setw(20) << "Predicted (DeNorm)" << std::setw(18) << "Abs Difference" << std::endl;
+    std::cout << "--------------------------------------------------------------------" << std::endl;
 
-    // For denormalized comparison, we need original unnormalized validation targets
-    std::vector<std::vector<double>> _, __; // dummy feature vectors
-    std::vector<double> original_train_targets, original_val_targets;
-    std::vector<double> original_all_targets_copy = target_prices_all;
-    Predicting_Close_Price_Using_NN::CSVReader::read_regression_data(filename, _, original_all_targets_copy, target_column_idx); // Reload for original
-    time_series_split(features_all, original_all_targets_copy, _, original_train_targets, __, original_val_targets, validation_split_ratio);
+    int eval_samples_count = 0;
+    std::vector<std::vector<double>>* features_for_eval = &X_val_norm; // Pointer to use either val or train
+    std::vector<double>* original_targets_for_eval = &y_val_orig;
 
-
-    int eval_samples = std::min((int)X_val.size(), 5);
-    if (eval_samples == 0 && !X_train.empty()) { // If no val set, show some train preds
-        eval_samples = std::min((int)X_train.size(), 5);
+    if (X_val_norm.empty() && !X_train_norm.empty()) { // If no validation set, show some training predictions
         std::cout << "(No validation set, showing predictions on first few training samples)" << std::endl;
-        for (int i = 0; i < eval_samples; ++i) {
-            if (X_train[i].empty()) continue;
-            std::vector<double> y_pred_vec_norm = nn.predict(X_train[i], false);
-            if (y_pred_vec_norm.empty()) continue;
-            double y_pred_denorm = denormalize_target_value_min_max(y_pred_vec_norm[0], target_scaling_info);
-            std::cout << std::fixed << std::setprecision(5)
-                      << std::setw(18) << original_train_targets[i] // using original unnormalized
-                      << std::setw(20) << y_pred_denorm << std::endl;
-        }
-    } else {
-        for (int i = 0; i < eval_samples; ++i) {
-            if (X_val[i].empty()) continue;
-            std::vector<double> y_pred_vec_norm = nn.predict(X_val[i], false);
-            if (y_pred_vec_norm.empty()) continue;
-            double y_pred_denorm = denormalize_target_value_min_max(y_pred_vec_norm[0], target_scaling_info);
-             std::cout << std::fixed << std::setprecision(5)
-                      << std::setw(18) << original_val_targets[i] // using original unnormalized
-                      << std::setw(20) << y_pred_denorm << std::endl;
-        }
+        features_for_eval = &X_train_norm;
+        original_targets_for_eval = &y_train_orig;
+    }
+    eval_samples_count = std::min((int)features_for_eval->size(), 5);
+
+
+    for (int i = 0; i < eval_samples_count; ++i) {
+        const auto& current_features_norm = (*features_for_eval)[i];
+        if (current_features_norm.empty()) continue;
+
+        std::vector<double> y_pred_vec_norm = nn.predict(current_features_norm, false);
+        if (y_pred_vec_norm.empty()) continue;
+
+        double y_pred_denorm = denormalize_target_value_min_max(y_pred_vec_norm[0], target_scaling_info);
+        double y_true_original = (*original_targets_for_eval)[i];
+        double diff_denorm = std::abs(y_pred_denorm - y_true_original);
+
+        std::cout << std::fixed << std::setprecision(5)
+                  << std::setw(18) << y_true_original
+                  << std::setw(20) << y_pred_denorm
+                  << std::setw(18) << diff_denorm
+                  << std::endl;
     }
 }
 
@@ -269,9 +271,9 @@ void run_training_and_evaluation() {
 int main() {
     std::cout << "Initializing main..." << std::endl;
 
-    std::cout << "\nRunning Training and Evaluation on CSV Data" << std::endl;
-    run_training_and_evaluation();
-    std::cout << "\nTraining and Evaluation on CSV Data Complete" << std::endl << std::endl;
+    std::cout << "\nRunning Main Training Pipeline " << std::endl;
+    run_main_training_pipeline();
+    std::cout << "\nMain Training Pipeline Completed" << std::endl << std::endl;
 
     return 0;
 }
