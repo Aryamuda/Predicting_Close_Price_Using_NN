@@ -1,6 +1,6 @@
 // src/main.cpp
 // Main entry point for the PricePredictorNN application.
-// Current focus: Using NeuralNetwork with Momentum and L2 Weight Decay.
+// Current focus: Using NeuralNetwork with Batch Normalization.
 
 #include <iostream>
 #include <vector>
@@ -11,6 +11,9 @@
 #include <numeric>
 #include <algorithm>
 #include <limits>
+#include "Utils.h"
+#include "Activations.h"
+#include "Loss.h"
 #include "Layer.h"
 #include "NeuralNetwork.h"
 #include "CSVReader.h"
@@ -71,7 +74,7 @@ std::vector<MinMaxVals> normalize_all_features_min_max(std::vector<std::vector<d
         double max_v = feature_scaling_params[j].max_val;
         double range = max_v - min_v;
         if (std::abs(range) < 1e-9) {
-            for (size_t i = 0; i < num_samples; ++i) features[i][j] = 0.0; // Or 0.5, or handle as constant
+            for (size_t i = 0; i < num_samples; ++i) features[i][j] = 0.0;
         } else {
             for (size_t i = 0; i < num_samples; ++i) features[i][j] = (features[i][j] - min_v) / range;
         }
@@ -87,7 +90,7 @@ MinMaxVals normalize_target_variable_min_max(std::vector<double>& target_variabl
     double max_v = target_scaling_params.max_val;
     double range = max_v - min_v;
     if (std::abs(range) < 1e-9) {
-        for (size_t i = 0; i < target_variable.size(); ++i) target_variable[i] = 0.0; // Or 0.5
+        for (size_t i = 0; i < target_variable.size(); ++i) target_variable[i] = 0.0;
     } else {
         for (size_t i = 0; i < target_variable.size(); ++i) target_variable[i] = (target_variable[i] - min_v) / range;
     }
@@ -205,21 +208,25 @@ void run_main_training_pipeline() {
     // --- Hyperparameters for training ---
     double learning_rate = 0.001;
     double dropout_rate = 0.1;
-    double momentum_coefficient = 0.9;      // Common value for momentum
-    double weight_decay_coefficient = 1e-4; // Common value for L2 regularization
+    double momentum_coefficient = 0.9;
+    double weight_decay_coefficient = 1e-4;
+    bool use_batch_normalization = true; // <--- SET BATCH NORM TO TRUE
 
     std::cout << "\nInitializing Neural Network with:" << std::endl;
     std::cout << "  Learning Rate: " << learning_rate << std::endl;
     std::cout << "  Dropout Rate (for hidden layers): " << dropout_rate << std::endl;
     std::cout << "  Momentum Coefficient: " << momentum_coefficient << std::endl;
     std::cout << "  Weight Decay (L2) Coefficient: " << weight_decay_coefficient << std::endl;
+    std::cout << "  Batch Normalization (for hidden layers): " << (use_batch_normalization ? "Enabled" : "Disabled") << std::endl;
+
 
     Predicting_Close_Price_Using_NN::NeuralNetwork nn(layer_sizes,
                                      activations,
                                      learning_rate,
                                      dropout_rate,
-                                     momentum_coefficient,      // Pass momentum
-                                     weight_decay_coefficient); // Pass weight decay
+                                     momentum_coefficient,
+                                     weight_decay_coefficient,
+                                     use_batch_normalization); // Pass BN flag
 
     int num_epochs = 200;
     int print_every_n_epochs = 20;
@@ -275,7 +282,7 @@ int main() {
 
     std::cout << "\nRunning Main Training Pipeline" << std::endl;
     run_main_training_pipeline();
-    std::cout << "Main Training Pipeline Complete" << std::endl << std::endl;
+    std::cout << "\nMain Training Pipeline Completed" << std::endl << std::endl;
 
     return 0;
 }

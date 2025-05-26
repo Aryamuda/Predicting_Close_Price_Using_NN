@@ -1,27 +1,27 @@
-// include/NeuralNetwork.h
 #ifndef NEURAL_NETWORK_HPP
 #define NEURAL_NETWORK_HPP
 
 #include <vector>
 #include <string>
-#include <stdexcept>
-#include "Layer.h"
-#include "Loss.h"
+#include <stdexcept> // For std::invalid_argument
+#include "Layer.h"   // We are composing Layer objects
+#include "Loss.h"    // For Loss functions
+#include "BatchNormLayer.h" // Include BatchNormLayer header
 
 namespace Predicting_Close_Price_Using_NN {
 
     class NeuralNetwork {
     public:
-        // --- Member Variables ---
+        //Variables
         std::vector<Layer> layers_;
-        double learning_rate_;
-        double momentum_coeff_;      // Coefficient for momentum (e.g., 0.9)
-        double weight_decay_coeff_;  // Coefficient for L2 weight decay (e.g., 1e-4)
+        std::vector<BatchNormLayer> bn_layers_; // BatchNorm layers, one per corresponding Layer
+        std::vector<bool> use_bn_for_layer_;   // Flags to indicate if BN is used for a layer
 
-        // Velocities for momentum update
-        // Structure: [layer_index][neuron_index_in_layer][weight_index_for_neuron]
+        double learning_rate_;
+        double momentum_coeff_;
+        double weight_decay_coeff_;
+
         std::vector<std::vector<std::vector<double>>> velocity_weights_;
-        // Structure: [layer_index][neuron_index_in_layer]
         std::vector<std::vector<double>> velocity_biases_;
 
 
@@ -30,8 +30,9 @@ namespace Predicting_Close_Price_Using_NN {
                       const std::vector<std::string>& activations,
                       double learning_rate,
                       double dropout_rate = 0.0,
-                      double momentum_coeff = 0.0,      // Default to no momentum
-                      double weight_decay_coeff = 0.0); // Default to no weight decay
+                      double momentum_coeff = 0.0,
+                      double weight_decay_coeff = 0.0,
+                      bool apply_batch_norm = false); // New parameter for BN
 
 
         // --- Methods ---
