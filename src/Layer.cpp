@@ -6,6 +6,7 @@
 #include <stdexcept>
 #include <numeric>
 #include <iostream>
+#include <algorithm>
 
 namespace Predicting_Close_Price_Using_NN {
 
@@ -21,11 +22,10 @@ namespace Predicting_Close_Price_Using_NN {
         if (output_size <= 0) {
             throw std::invalid_argument("Layer output size must be positive.");
         }
-        if (dropout_rate < 0.0 || dropout_rate >= 1.0) {
+        if (dropout_rate < 0.0 || dropout_rate >= 1.0) { // dropout_rate = 1.0 would zero everything
             throw std::invalid_argument("Dropout rate must be in [0.0, 1.0).");
         }
 
-        // Validate activation type
         if (activation_type_ != "relu" && activation_type_ != "sigmoid" && activation_type_ != "linear") {
             throw std::invalid_argument("Unsupported activation type: " + activation_type_ +
                                         ". Supported types are 'relu', 'sigmoid', 'linear'.");
@@ -33,11 +33,11 @@ namespace Predicting_Close_Price_Using_NN {
 
         initialize_parameters();
 
-        // Initialize cache vectors with correct sizes, filled with 0.0
         input_cache_.resize(input_size_, 0.0);
         z_cache_.resize(output_size_, 0.0);
         activation_cache_.resize(output_size_, 0.0);
-        delta_.assign(output_size_, 0.0); // Ensure delta_ is also initialized properly
+        delta_.assign(output_size_, 0.0);
+        dropout_mask_.resize(output_size_, 1.0); // Initialize mask (will be regenerated)
     }
 
     void Layer::initialize_parameters() {
@@ -46,9 +46,8 @@ namespace Predicting_Close_Price_Using_NN {
 
         double scale = 1.0;
         if (activation_type_ == "relu") {
-            scale = std::sqrt(2.0 / input_size_); // He initialization
+            scale = std::sqrt(2.0 / input_size_);
         } else if (activation_type_ == "sigmoid" || activation_type_ == "linear") {
-            // Xavier/Glorot initialization for sigmoid/linear (can be tuned for linear)
             scale = std::sqrt(1.0 / input_size_);
         }
 
@@ -59,15 +58,30 @@ namespace Predicting_Close_Price_Using_NN {
         }
     }
 
+    void Layer::generate_dropout_mask(bool training_mode) {
+        if (!training_mode || dropout_rate_ == 0.0) {
+             std::fill(dropout_mask_.begin(), dropout_mask_.end(), 1.0);
+            return;
+        }
+        double scale_factor = 1.0 / (1.0 - dropout_rate_);
+        static std::mt19937 random_engine(std::random_device{}());
+        std::uniform_real_distribution<double> dist(0.0, 1.0);
+
+        for (int i = 0; i < output_size_; ++i) {
+            if (dist(random_engine) < dropout_rate_) {
+                dropout_mask_[i] = 0.0;
+            } else {
+                dropout_mask_[i] = scale_factor;
+            }
+        }
+    }
+
     std::vector<double> Layer::forward(const std::vector<double>& input_data, bool training_mode) {
         if (static_cast<int>(input_data.size()) != input_size_) {
             throw std::invalid_argument("Layer::forward - Input data size (" + std::to_string(input_data.size()) +
                                         ") does not match layer input size (" + std::to_string(input_size_) + ").");
         }
-
-        // Cache the input data
         input_cache_ = input_data;
-        (void)training_mode;
 
         for (int i = 0; i < output_size_; ++i) {
             double z_neuron_i = biases_[i];
@@ -77,7 +91,6 @@ namespace Predicting_Close_Price_Using_NN {
             z_cache_[i] = z_neuron_i;
         }
 
-        // activation_cache_ has already been resized.
         if (activation_type_ == "relu") {
             for (int i = 0; i < output_size_; ++i) {
                 activation_cache_[i] = Activations::relu(z_cache_[i]);
@@ -91,61 +104,65 @@ namespace Predicting_Close_Price_Using_NN {
                 activation_cache_[i] = Activations::linear(z_cache_[i]);
             }
         }
+
+        if (dropout_rate_ > 0.0) {
+            generate_dropout_mask(training_mode);
+            if (training_mode) {
+                for (int i = 0; i < output_size_; ++i) {
+                    activation_cache_[i] *= dropout_mask_[i];
+                }
+            }
+        }
+
         return activation_cache_;
     }
 
-    std::vector<double> Layer::backward(const std::vector<double>& error_from_next_layer, double learning_rate) {
+    std::vector<double> Layer::backward(const std::vector<double>& error_from_next_layer) {
         if (static_cast<int>(error_from_next_layer.size()) != output_size_) {
             throw std::invalid_argument("Layer::backward - error_from_next_layer size (" + std::to_string(error_from_next_layer.size()) +
                                         ") does not match layer output size (" + std::to_string(output_size_) + ").");
         }
 
-        // Step 1: Calculate delta_ for this layer (dError/dZ_this_layer)
-
         if (delta_.size() != static_cast<size_t>(output_size_)) {
             delta_.resize(output_size_);
         }
 
+        // Calculate delta_ (dError/dZ) for this layer
         if (activation_type_ == "relu") {
             for (int i = 0; i < output_size_; ++i) {
                 delta_[i] = error_from_next_layer[i] * Activations::relu_derivative(z_cache_[i]);
             }
         } else if (activation_type_ == "sigmoid") {
             for (int i = 0; i < output_size_; ++i) {
-                // Sigmoid derivative uses the activated output (A)
                 delta_[i] = error_from_next_layer[i] * Activations::sigmoid_derivative(activation_cache_[i]);
             }
         } else if (activation_type_ == "linear") {
             for (int i = 0; i < output_size_; ++i) {
-                delta_[i] = error_from_next_layer[i] * Activations::linear_derivative(z_cache_[i]); // which is just error_from_next_layer[i] * 1.0
+                delta_[i] = error_from_next_layer[i] * Activations::linear_derivative(z_cache_[i]);
             }
         }
 
+        // Apply dropout mask to deltas
+        if (dropout_rate_ > 0.0) {
+            // The dropout_mask_ must be the one from the corresponding forward pass.
+            // It's a member variable, so it should persist correctly between forward and backward for a given sample.
+            for (int i = 0; i < output_size_; ++i) {
+                delta_[i] *= dropout_mask_[i];
+            }
+        }
 
-        // Step 2: Calculate error to propagate to the previous layer (dError/dA_previous_layer)
         // error_to_prev_layer = W^T * delta_
         std::vector<double> error_to_prev_layer(input_size_, 0.0);
-        for (int j = 0; j < input_size_; ++j) { // For each neuron in the previous layer (or input feature)
+        for (int j = 0; j < input_size_; ++j) {
             double sum_error_for_input_j = 0.0;
-            for (int i = 0; i < output_size_; ++i) { // Sum over neurons in this current layer
+            for (int i = 0; i < output_size_; ++i) {
                 sum_error_for_input_j += weights_[i][j] * delta_[i];
             }
             error_to_prev_layer[j] = sum_error_for_input_j;
         }
 
-        // Step 3: Calculate gradients for weights and biases
-        // Update weights (dW_ij = delta_i * input_cache_j)
-        for (int i = 0; i < output_size_; ++i) { // For each neuron in this layer
-            for (int j = 0; j < input_size_; ++j) { // For each input to this neuron
-                double dW_ij = delta_[i] * input_cache_[j];
-                weights_[i][j] -= learning_rate * dW_ij;
-            }
-            // Update bias (db_i = delta_i)
-            double db_i = delta_[i];
-            biases_[i] -= learning_rate * db_i;
-        }
 
         return error_to_prev_layer;
     }
 
-}
+} // namespace PricePredictorNN
