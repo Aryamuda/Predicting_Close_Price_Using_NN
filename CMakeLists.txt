@@ -17,7 +17,9 @@ add_executable(Predicting_Close_Price_Using_NN src/main.cpp
         include/CSVReader.h
         src/CSVReader.cpp
         include/BatchNormLayer.h
-        src/BatchNormLayer.cpp)
+        src/BatchNormLayer.cpp
+        include/BatchDataLoader.h
+        src/BatchDataLoader.cpp)
 
 # Specify  directories
 include_directories(include)
