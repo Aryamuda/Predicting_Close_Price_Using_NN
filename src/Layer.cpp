@@ -127,7 +127,6 @@ namespace Predicting_Close_Price_Using_NN {
             delta_.resize(output_size_);
         }
 
-        // Calculate delta_ (dError/dZ) for this layer
         if (activation_type_ == "relu") {
             for (int i = 0; i < output_size_; ++i) {
                 delta_[i] = error_from_next_layer[i] * Activations::relu_derivative(z_cache_[i]);

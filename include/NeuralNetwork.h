@@ -10,9 +10,17 @@
 
 namespace Predicting_Close_Price_Using_NN {
 
+    // NEW: Struct to hold multiple regression metrics
+    struct RegressionMetrics {
+        double mse = 0.0; // Mean Squared Error
+        double rmse = 0.0; // Root Mean Squared Error
+        double mae = 0.0; // Mean Absolute Error
+        double r2 = 0.0;  // R-squared (Coefficient of Determination)
+    };
+
     class NeuralNetwork {
     public:
-        //Variables
+        // --- Member Variables ---
         std::vector<Layer> layers_;
         std::vector<BatchNormLayer> bn_layers_;
         std::vector<bool> use_bn_for_layer_;
@@ -21,16 +29,14 @@ namespace Predicting_Close_Price_Using_NN {
         double momentum_coeff_;
         double weight_decay_coeff_;
 
-        // Velocities for momentum update
         std::vector<std::vector<std::vector<double>>> velocity_weights_;
         std::vector<std::vector<double>> velocity_biases_;
 
-        //Gradient Accumulation
         std::vector<std::vector<std::vector<double>>> accumulated_weight_gradients_;
         std::vector<std::vector<double>> accumulated_bias_gradients_;
 
 
-        //Constructor
+        // --- Constructor ---
         NeuralNetwork(const std::vector<int>& layer_sizes,
                       const std::vector<std::string>& activations,
                       double learning_rate,
@@ -43,33 +49,38 @@ namespace Predicting_Close_Price_Using_NN {
         // --- Methods ---
         std::vector<double> predict(const std::vector<double>& input_data, bool training_mode = false);
 
-        //Processes a single input sample: performs forward and backward pass
         void process_sample_and_accumulate_gradients(const std::vector<double>& x_input, double y_true_price);
 
-        //Applies the accumulated gradients (averaged by batch size) to update
         void apply_accumulated_gradients(size_t batch_size);
 
 
         void train(const std::vector<std::vector<double>>& X_train,
                    const std::vector<double>& y_train,
                    int epochs,
-                   size_t batch_size, // <-- NEW: Add batch_size parameter
+                   size_t batch_size,
                    int print_every_n_epochs = 10,
                    const std::vector<std::vector<double>>& X_val = {},
                    const std::vector<double>& y_val = {});
 
-
-        double evaluate_regression(const std::vector<std::vector<double>>& X_data,
-                                   const std::vector<double>& y_true_targets);
+        /**
+         * @brief Evaluates the network's performance on a given dataset.
+         * Note: Metrics are calculated on the provided values (e.g., normalized if inputs are normalized).
+         * @param X_data The input features for the test/validation set.
+         * @param y_true_targets The true target values for the test/validation set.
+         * @return A RegressionMetrics struct containing MSE, RMSE, MAE, and R2.
+         */
+        RegressionMetrics evaluate_regression( // <-- CHANGED RETURN TYPE
+            const std::vector<std::vector<double>>& X_data,
+            const std::vector<double>& y_true_targets);
 
         size_t get_num_layers() const { return layers_.size(); }
 
     private:
         void initialize_momentum_velocities();
-        void initialize_accumulated_gradients(); //Set up gradient accumulators
-        void reset_accumulated_gradients();      //Clear accumulators after batch update
+        void initialize_accumulated_gradients();
+        void reset_accumulated_gradients();
     };
 
 }
 
-#endif
+#endif //NEURAL_NETWORK_HPP

@@ -4,10 +4,12 @@
 #include "BatchDataLoader.h"
 #include <iostream>
 #include <stdexcept>
-#include <numeric>
-#include <algorithm>
+#include <numeric> // For std::accumulate, std::inner_product
+#include <algorithm> // For std::shuffle, std::transform
 #include <random>
 #include <iomanip>
+#include <cmath>     // For std::sqrt, std::abs, std::pow
+#include <limits>    // For std::numeric_limits
 
 namespace Predicting_Close_Price_Using_NN {
 
@@ -22,7 +24,6 @@ namespace Predicting_Close_Price_Using_NN {
           momentum_coeff_(momentum_coeff),
           weight_decay_coeff_(weight_decay_coeff) {
 
-        //Validations
         if (layer_sizes.size() < 2) { throw std::invalid_argument("NN Ctor: Min 2 layer_sizes."); }
         if (layer_sizes.size() - 1 != activations.size()) { throw std::invalid_argument("NN Ctor: layer_sizes/activations mismatch."); }
         if (learning_rate <= 0.0) { throw std::invalid_argument("NN Ctor: LR must be > 0."); }
@@ -30,27 +31,22 @@ namespace Predicting_Close_Price_Using_NN {
         if (momentum_coeff < 0.0 || momentum_coeff >= 1.0) { throw std::invalid_argument("NN Ctor: Momentum [0,1)."); }
         if (weight_decay_coeff < 0.0) { throw std::invalid_argument("NN Ctor: Weight decay >= 0."); }
 
-        //Create Layers and BatchNormLayers
         size_t num_dense_layers = activations.size();
         use_bn_for_layer_.resize(num_dense_layers, false);
-        // Do not resize bn_layers_ here with default constructor. Reserve space instead.
         bn_layers_.reserve(num_dense_layers);
 
         for (size_t i = 0; i < num_dense_layers; ++i) {
             int input_dim = layer_sizes[i];
-            int output_dim = layer_sizes[i + 1]; // Output dimension of the current dense layer
+            int output_dim = layer_sizes[i + 1];
             std::string activation = activations[i];
             double current_dropout = (i < num_dense_layers - 1) ? dropout_rate : 0.0;
-
             try {
-                // Create the dense layer
                 layers_.emplace_back(input_dim, output_dim, activation, current_dropout);
-                bn_layers_.emplace_back(output_dim); // Always construct with parameters
-
-                if (apply_batch_norm && i < num_dense_layers - 1) { // Apply BN only after hidden layers
+                bn_layers_.emplace_back(output_dim);
+                if (apply_batch_norm && i < num_dense_layers - 1) {
                     use_bn_for_layer_[i] = true;
                 } else {
-                    use_bn_for_layer_[i] = false; // No BN for output layer or if disabled globally
+                    use_bn_for_layer_[i] = false;
                 }
             } catch (const std::exception& e) {
                 throw std::runtime_error("NN Ctor: Layer " + std::to_string(i) + " or BNLayer creation failed: " + e.what());
@@ -97,12 +93,8 @@ namespace Predicting_Close_Price_Using_NN {
         for (size_t i = 0; i < layers_.size(); ++i) {
             current_output = layers_[i].forward(current_output, training_mode);
             if (use_bn_for_layer_[i]) {
-                 // Ensure bn_layers_ has an entry for this layer if use_bn_for_layer_[i] is true
-                if (i < bn_layers_.size()) {
-                    current_output = bn_layers_[i].forward(current_output, training_mode);
-                } else {
-                     std::cerr << "Warning: use_bn_for_layer_[" << i << "] is true, but bn_layers_ size is " << bn_layers_.size() << ". Skipping BN." << std::endl;
-                }
+                if (i < bn_layers_.size()) { current_output = bn_layers_[i].forward(current_output, training_mode); }
+                 else { std::cerr << "Warning: use_bn_for_layer_[" << i << "] is true, but bn_layers_ size is " << bn_layers_.size() << ". Skipping BN." << std::endl;}
             }
         }
         return current_output;
@@ -214,12 +206,12 @@ namespace Predicting_Close_Price_Using_NN {
                 }
             }
             if (print_every_n_epochs > 0 && ((epoch + 1) % print_every_n_epochs == 0 || epoch == 0 || epoch == epochs - 1)) {
-                double train_mse = evaluate_regression(X_train, y_train);
+                RegressionMetrics train_metrics = evaluate_regression(X_train, y_train);
                 std::cout << "Epoch " << std::setw(4) << (epoch + 1) << "/" << epochs
-                          << " | Train MSE (Norm): " << std::fixed << std::setprecision(8) << train_mse;
+                          << " | Train MSE: " << std::fixed << std::setprecision(8) << train_metrics.mse;
                 if (has_validation_data && !X_val.empty()) {
-                    double val_mse = evaluate_regression(X_val, y_val);
-                    std::cout << " | Val MSE (Norm): " << std::fixed << std::setprecision(8) << val_mse;
+                    RegressionMetrics val_metrics = evaluate_regression(X_val, y_val);
+                    std::cout << " | Val MSE: " << std::fixed << std::setprecision(8) << val_metrics.mse;
                 }
                 std::cout << std::endl;
             }
@@ -227,25 +219,83 @@ namespace Predicting_Close_Price_Using_NN {
         std::cout << "Neural Network training complete." << std::endl;
     }
 
-    double NeuralNetwork::evaluate_regression(
+
+    RegressionMetrics NeuralNetwork::evaluate_regression(
         const std::vector<std::vector<double>>& X_data,
         const std::vector<double>& y_true_targets) {
-        if (X_data.size() != y_true_targets.size()) { throw std::invalid_argument("eval_reg: X/y mismatch."); }
-        if (X_data.empty()) { return 0.0; }
-        if (layers_.empty()) { throw std::runtime_error("eval_reg: No layers."); }
-        double total_squared_error = 0.0;
-        int valid_predictions = 0;
-        for (size_t i = 0; i < X_data.size(); ++i) {
-            if (X_data[i].empty() || static_cast<int>(X_data[i].size()) != layers_[0].input_size_) { continue; }
-            std::vector<double> y_pred_vec = predict(X_data[i], false);
-            if (y_pred_vec.size() != 1) { continue; }
-            double y_pred = y_pred_vec[0];
-            double error = y_pred - y_true_targets[i];
-            total_squared_error += error * error;
-            valid_predictions++;
+
+        RegressionMetrics metrics;
+        if (X_data.size() != y_true_targets.size()) {
+            throw std::invalid_argument("evaluate_regression: X_data and y_true_targets must have the same number of samples.");
         }
-        if (valid_predictions == 0) { return std::numeric_limits<double>::quiet_NaN(); }
-        return total_squared_error / static_cast<double>(valid_predictions);
+        if (X_data.empty()) {
+            std::cout << "Warning: evaluate_regression called with empty dataset." << std::endl;
+            metrics.mse = metrics.rmse = metrics.mae = metrics.r2 = std::numeric_limits<double>::quiet_NaN(); // Indicate invalid result
+            return metrics;
+        }
+        if (layers_.empty()) {
+            throw std::runtime_error("evaluate_regression: Network has no layers to make predictions.");
+        }
+
+        double total_squared_error = 0.0;
+        double total_absolute_error = 0.0;
+        std::vector<double> y_predictions;
+        y_predictions.reserve(X_data.size());
+        std::vector<double> y_true_for_r2; // Store corresponding true values for R2 calculation
+        y_true_for_r2.reserve(X_data.size());
+
+
+        int valid_predictions_count = 0;
+
+        for (size_t i = 0; i < X_data.size(); ++i) {
+            if (X_data[i].empty() || static_cast<int>(X_data[i].size()) != layers_[0].input_size_) {
+                continue;
+            }
+            std::vector<double> y_pred_vec = predict(X_data[i], false);
+            if (y_pred_vec.size() != 1) {
+                continue;
+            }
+            double y_pred = y_pred_vec[0];
+            double y_true = y_true_targets[i];
+
+            y_predictions.push_back(y_pred);
+            y_true_for_r2.push_back(y_true); // Store the true value for this prediction
+
+            double error = y_pred - y_true;
+            total_squared_error += error * error;
+            total_absolute_error += std::abs(error);
+            valid_predictions_count++;
+        }
+
+        if (valid_predictions_count == 0) {
+            std::cout << "Warning: evaluate_regression - No valid predictions were made." << std::endl;
+            metrics.mse = metrics.rmse = metrics.mae = metrics.r2 = std::numeric_limits<double>::quiet_NaN();
+            return metrics;
+        }
+
+        metrics.mse = total_squared_error / static_cast<double>(valid_predictions_count);
+        metrics.rmse = std::sqrt(metrics.mse);
+        metrics.mae = total_absolute_error / static_cast<double>(valid_predictions_count);
+
+        if (valid_predictions_count > 1) {
+            double mean_y_true_for_predicted_samples = std::accumulate(y_true_for_r2.begin(), y_true_for_r2.end(), 0.0) / y_true_for_r2.size();
+
+            double tss = 0.0;
+            for(double val : y_true_for_r2) {
+                tss += std::pow(val - mean_y_true_for_predicted_samples, 2);
+            }
+
+            // Residual Sum of Squares (RSS) is total_squared_error (calculated on the same set of predictions)
+            if (std::abs(tss) < 1e-9) {
+                metrics.r2 = (std::abs(total_squared_error) < 1e-9) ? 1.0 : 0.0;
+            } else {
+                metrics.r2 = 1.0 - (total_squared_error / tss);
+            }
+        } else {
+            metrics.r2 = std::numeric_limits<double>::quiet_NaN();
+        }
+
+        return metrics;
     }
 
-}
+} // namespace PricePredictorNN
